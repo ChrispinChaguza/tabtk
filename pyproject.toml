@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools"]
+
+[project]
+name = "tabtk"
+dynamic = ["version"]
+authors = [
+  { name="Chrispin Chaguza", email="chrispin.chaguza@gmail.com" },
+]
+
+maintainers = [
+  {name = "Chrispin Chaguza", email = "chrispin.chaguza@gmail.com"},
+]
+
+description = "tabtk: A toolkit for sequence similarity analysis based on tabular data"
+readme = {file = "README.md", content-type = "text/markdown"}
+license = "MIT"
+requires-python = ">=3.8"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+    "Intended Audience :: Science/Research",
+]
+
+keywords = ["Sequence similarity","K-mer","Cluster","Genome"]
+dependencies = [
+    "build"
+]
+
+[tool.setuptools.dynamic]
+version = {attr = "tabtk.__version__"}
+
+[tool.setuptools.packages]
+find = {} 
+
+[tool.setuptools]
+py-modules = ["tabtk.tabtk"]
+
+[project.scripts]
+tabtk = "tabtk.__main__:main"
+
+[project.urls]
+Homepage = "https://github.com/ChrispinChaguza/tabtk"
+Repository = "https://github.com/ChrispinChaguza/tabtk.git"
+Issues = "https://github.com/ChrispinChaguza/tabtk/issues"
+Documentation = "https://github.com/ChrispinChaguza/tabtk"
+Website = "https://github.com/ChrispinChaguza/tabtk"
+

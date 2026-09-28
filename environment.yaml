@@ -1,0 +1,16 @@
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - datamash
+  - bifrost
+  - dsk
+  - parallel
+  - progress
+  - plink
+  - biopython
+  - pandas
+  - networkx
+  - mash
+  - fastani
