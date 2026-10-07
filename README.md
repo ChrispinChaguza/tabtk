@@ -4,7 +4,7 @@ A toolkit for sequence similarity analysis based on tabular data
 # Installation
 
 ```
-conda env create --name tabtk -f environment.yaml --yes
+conda env create --name tabtk --file environment.yaml --yes
 pip install tabtk
 ```
 

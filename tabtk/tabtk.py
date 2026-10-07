@@ -16,6 +16,8 @@ import pandas as pd
 import networkx as nx
 import math
 import datetime
+import statistics
+import glob
 from .__init__ import __version__
 
 def pairwiseSimilarity(firstRecord,secondRecord):
@@ -122,6 +124,98 @@ def mashSimilarity(cmdValues):
 
     return(mashResults)    
 
+def blastSimilarity(cmdValues):
+    if not shutil.which("blastn"):
+        print("Install BLAST and try again... exiting...")
+        sys.exit()
+
+    else:
+        pass
+
+    tmpFileNames = []
+    fileNames = []
+
+    tmpCmd="wc -l "+str(cmdValues["data"])+" | awk '{print $1}'"
+    dataFileLines=subprocess.Popen(tmpCmd,shell=True, stderr=subprocess.STDOUT, stdout=subprocess.PIPE)
+    dataLines = int(dataFileLines.communicate()[0])
+    dataFileLines.kill()
+
+    bar = ChargingBar("Loading data", max=int(dataLines))
+    for fileName in open(cmdValues["data"],"r"):
+        fileNames.append(str(fileName).strip())
+
+        bar.next()
+    bar.finish()
+
+    for i in fileNames:
+        tmpFileNames.append(f"{Path(i).stem}.tmpfna")
+
+        with open(f"{Path(i).stem}.tmpfna","w") as fh:
+            for j in SeqIO.parse(i,"fasta"):
+                fh.write(f">{Path(os.path.basename(i)).stem}\n{j.seq}\n") 
+
+    tmpOut = f"blast.{str(datetime.datetime.now()).replace(" ","").replace("-",".").replace(":",".")}"
+
+    Cmd1 = f"cat {" ".join(tmpFileNames)} > {tmpOut}"
+    Cmd2 = f"makeblastdb -in {tmpOut} -dbtype nucl"
+
+    subprocess.call(Cmd1,shell=True,stdout=subprocess.DEVNULL,stderr=subprocess.STDOUT)
+    subprocess.call(Cmd2,shell=True,stdout=subprocess.DEVNULL,stderr=subprocess.STDOUT)
+
+    print("Calculating percent similarity... may take longer... be patient...")
+
+    tmpOut1 = f"blast.{str(datetime.datetime.now()).replace(" ","").replace("-",".").replace(":",".")}"
+    tmpOut2 = f"blast.{str(datetime.datetime.now()).replace(" ","").replace("-",".").replace(":",".")}"
+
+    blastCmd1 = f"echo \'qseqid sseqid length pident qcovs\' | tr \' \' \'\\t\' > {tmpOut2}"
+    blastCmd2 = f"blastn -db {tmpOut} -query {tmpOut} -num_threads {cmdValues["threads"]} -outfmt \'6 qseqid sseqid length pident qcovs\' -evalue 0.001 >> {tmpOut2}"
+
+    subprocess.call(blastCmd1,shell=True,stdout=subprocess.DEVNULL,stderr=subprocess.STDOUT)
+    subprocess.call(blastCmd2,shell=True,stdout=subprocess.DEVNULL,stderr=subprocess.STDOUT)
+
+    blastData = pd.read_csv(tmpOut2,delimiter="\t",dtype={'pident': float,'qcovs': float})
+    blastData["tmp"] = blastData.apply(lambda x: (x["qcovs"] * x["pident"])/100,axis=1)
+
+    blastData["qseqidR"] = blastData.apply(lambda x: x["qseqid"] if x["qseqid"] > x["sseqid"] else x["sseqid"],axis=1)
+    blastData["sseqidR"] = blastData.apply(lambda x: x["qseqid"] if x["qseqid"] < x["sseqid"] else x["sseqid"],axis=1)
+
+    blastData["qseqid"] = blastData["qseqidR"]
+    blastData["sseqid"] = blastData["sseqidR"]
+
+    blastData["cov"] = blastData[["qseqid","sseqid","tmp"]].groupby(["qseqid","sseqid"])["tmp"].transform(lambda x: statistics.mean(x))
+    blastDataR = blastData.groupby(["qseqid","sseqid"]).first().reset_index()
+
+    blastData = blastDataR.drop(columns=["tmp","length","pident","qseqidR","sseqidR"])
+    blastDataFinal = blastData[["sseqid","qseqid","cov"]].rename(columns={"sseqid":"seq1","qseqid":"seq2","cov":"pid"}).values.tolist()
+
+    bar = ChargingBar("Cleaning temporary files", max=len(fileNames))
+    for fileName in tmpFileNames:
+        if os.path.exists(fileName):
+            os.remove(fileName)
+        else:
+            pass
+            
+        bar.next() 
+    bar.finish() 
+
+    if os.path.exists(tmpOut1):
+        os.remove(tmpOut1)
+    else:
+        pass
+
+    if os.path.exists(tmpOut2):
+        os.remove(tmpOut2)
+    else:
+        pass
+
+    for file in glob.glob(f"{tmpOut}*"):
+        if os.path.exists(file):
+            os.remove(file)
+        else:
+            pass
+
+    return(blastDataFinal)
+
 
 def fastaniSimilarity(cmdValues):
     if not shutil.which("fastANI"):
@@ -170,7 +264,7 @@ def similarity(cmdValues):
     else:
         pass
 
-    if (not cmdValues["aln"]) and (not cmdValues["mash"]) and (not cmdValues["fastani"]):
+    if (not cmdValues["blast"]) and (not cmdValues["aln"]) and (not cmdValues["mash"]) and (not cmdValues["fastani"]):
         dataMatrixDF = loadDataTable(cmdValues)
 
         itemPairs = itertools.permutations([item for pos,item in enumerate(dataMatrixDF.keys()) if pos>0], r=2)
@@ -192,7 +286,7 @@ def similarity(cmdValues):
                 bar.next()
             bar.finish()
 
-    elif (not cmdValues["aln"]) and (cmdValues["mash"]) and (not cmdValues["fastani"]):
+    elif (not cmdValues["blast"]) and (not cmdValues["aln"]) and (cmdValues["mash"]) and (not cmdValues["fastani"]):
         similarityResults = mashSimilarity(cmdValues)
 
         with open(cmdValues["output"],"w") as simData:
@@ -205,7 +299,7 @@ def similarity(cmdValues):
                 bar.next()
             bar.finish()
 
-    elif (not cmdValues["aln"]) and (not cmdValues["mash"]) and (cmdValues["fastani"]):
+    elif (not cmdValues["blast"]) and (not cmdValues["aln"]) and (not cmdValues["mash"]) and (cmdValues["fastani"]):
         similarityResults = fastaniSimilarity(cmdValues)
 
         with open(cmdValues["output"],"w") as simData:
@@ -218,14 +312,13 @@ def similarity(cmdValues):
                 bar.next()
             bar.finish()
 
-    elif (cmdValues["aln"]) and (not cmdValues["mash"]) and (not cmdValues["fastani"]):
+    elif (not cmdValues["blast"]) and (cmdValues["aln"]) and (not cmdValues["mash"]) and (not cmdValues["fastani"]):
         alignment={}
 
         for i in SeqIO.parse(cmdValues['data'],"fasta"):
             alignment[i.id]=i
 
         fhandle=open(str(cmdValues['outputFile']),"w")
-
         fhandle.write("seq1\tseq2\tpid\n")
 
         tmpList = sorted(map(sorted, combinations(set([i for i in alignment.keys()]), 2)))
@@ -233,6 +326,19 @@ def similarity(cmdValues):
         with multiprocessing.Pool(processes=cmdValues['threads']) as pool:
             args=[(alignment[m],alignment[n]) for m,n in tmpList]
             results=pool.starmap(alignmentSimilarity, args)
+
+    elif (cmdValues["blast"]) and (not cmdValues["aln"]) and (not cmdValues["mash"]) and (not cmdValues["fastani"]):
+        similarityResults = blastSimilarity(cmdValues)
+
+        with open(cmdValues["output"],"w") as simData:
+            simData.write("seq1\tseq2\tpid\n")
+
+            bar = ChargingBar('Writing similarity values', max=len(similarityResults))
+            for itemPair in similarityResults:
+                simData.write(f"{"\t".join([str(r) for r in itemPair])}\n")
+
+                bar.next()
+            bar.finish()
 
     else:
         pass
@@ -258,6 +364,7 @@ def transpose(cmdValues):
 def lineages1Levels(cmdValues):
     np.random.rand(1)
 
+    print(cmdValues["thresholds"][0])
     snpDistDF = pd.read_csv(cmdValues["data"],delimiter="\t",header=0)
 
     Graph = nx.Graph()
@@ -857,15 +964,19 @@ def gwas(cmdValues):
                 bar.finish()
 
 
-def queryKmers(seqNum,seqFile,kmerFile):
+def queryKmers(seqNum,seqFile,kmerFile,cmdValues):
     seqFileName = Path(os.path.basename(seqFile)).stem
     tmpOutFileA = f"bifrost.{str(datetime.datetime.now()).replace(" ","").replace("-",".").replace(":",".")}"
 
     tmpCmd1 = f"Bifrost build -t 3 -k 31 -i -d -r {seqFile} -o {tmpOutFileA}.graph" 
     subprocess.call(tmpCmd1,shell=True,stdout=subprocess.DEVNULL,stderr=subprocess.STDOUT)
 
-    tmpCmd2 = f"Bifrost query -t 5 -e 1 -q {kmerFile} -g {tmpOutFileA}.graph.gfa.gz -o {tmpOutFileA}" 
-    subprocess.call(tmpCmd2,shell=True,stdout=subprocess.DEVNULL,stderr=subprocess.STDOUT)
+    if cmdValues["approximate"]:
+        tmpCmd2 = f"Bifrost query -a -t 5 -e 1 -q {kmerFile} -g {tmpOutFileA}.graph.gfa.gz -o {tmpOutFileA}"
+        subprocess.call(tmpCmd2,shell=True,stdout=subprocess.DEVNULL,stderr=subprocess.STDOUT)
+    else:
+        tmpCmd2 = f"Bifrost query -t 5 -e 1 -q {kmerFile} -g {tmpOutFileA}.graph.gfa.gz -o {tmpOutFileA}" 
+        subprocess.call(tmpCmd2,shell=True,stdout=subprocess.DEVNULL,stderr=subprocess.STDOUT)
 
     tmpCmd3 = f"echo {seqFileName} > {tmpOutFileA}.out.tsv"
     subprocess.call(tmpCmd3,shell=True,stdout=subprocess.DEVNULL,stderr=subprocess.STDOUT)
@@ -1006,7 +1117,7 @@ def table(cmdValues):
             bar = ChargingBar("Generating k-mers (DSK)", max=2)
             dskCmdTmpFile = f"KMERS.{str(datetime.datetime.now()).replace(" ","").replace("-",".").replace(":",".")}"
 
-            dsk1Cmd = f"dsk -kmer-size {cmdValues["length"]} -file {cmdValues["data"]} -out {dskCmdTmpFile} -nb-cores {cmdValues["threads"]}"
+            dsk1Cmd = f"dsk -kmer-size {cmdValues["length"]} -abundance-min {cmdValues["minabundance"]} -max-memory {cmdValues["maxmemory"]} -file {cmdValues["data"]} -out {dskCmdTmpFile} -nb-cores {cmdValues["threads"]}"
             subprocess.call(dsk1Cmd,shell=True,stdout=subprocess.DEVNULL,stderr=subprocess.STDOUT)
             bar.next()      
 
@@ -1096,7 +1207,7 @@ def table(cmdValues):
     print("Query k-mers against sequences... may take longer... be patient...")
 
     with multiprocessing.Pool(processes=cmdValues["threads"]) as pool:
-        args = [(seqFileNum,seqFileName,kmersFile) for seqFileNum,seqFileName in seqFileDF]
+        args = [(seqFileNum,seqFileName,kmersFile,cmdValues) for seqFileNum,seqFileName in seqFileDF]
         kmerResults = pool.starmap(queryKmers, args)
 
     with open(f"{Path(cmdValues["output"]).stem}.table.tsv","w") as kmerData:
@@ -1208,8 +1319,8 @@ def tabtkMain():
                         metavar='output',dest='output',default="out.similarity.tsv",
                         help='Output percent similarity')
     similarityOptions.add_argument('--length','-l',action='store',required=False,nargs=1,
-                        metavar='length',dest='length',default=16,type=int,
-                        help='K-mer length for --mash/-m or --fastani/-n (default: 16)')
+                        metavar='length',dest='length',default=31,type=int,
+                        help='K-mer length for --mash/-m or --fastani/-n (default: 31)')
     similarityOptions.add_argument('--size','-s',action='store',required=False,nargs=1,
                         metavar='size',dest='size',default=1000000,type=int,
                         help='Sketch size for MASH; use with --mash (default: 1000000)')
@@ -1217,6 +1328,8 @@ def tabtkMain():
                         dest='mash',help='Calculate similarity using MASH')
     similarityOptions.add_argument('--fastani','-n',action='store_true',default=False,
                         dest='fastani',help='Calculate similarity using fastANI')
+    similarityOptions.add_argument('--blast','-b',action='store_true',default=False,
+                        dest='blast',help='Calculate similarity using BLAST')
     similarityOptions.add_argument('--aln','-a',action='store_true',default=False,
                         dest='aln',help='Calculate similarity based on a given sequence alignment') 
     similarityOptions.add_argument('--fraction','-c',action='store',required=False,nargs=1,
@@ -1401,6 +1514,12 @@ def tabtkMain():
     kmerMatrixOptions.add_argument('--length','-l',action='store',required=False,nargs=1,
                         metavar='length',dest='length',default=31,type=int,
                         help='K-mer length (default: 31)')
+    kmerMatrixOptions.add_argument('--min','-m',action='store',required=False,nargs=1,
+                        metavar='minabundance',dest='minabundance',default=1,type=int,
+                        help='Minimum k-mer abundance (default: 1)')
+    kmerMatrixOptions.add_argument('--maxmem','-x',action='store',required=False,nargs=1,
+                        metavar='maxmemory',dest='maxmemory',default=31,type=int,
+                        help='Maximum memory (default: 5000)')
     kmerMatrixOptions.add_argument('--dsk','-s',action='store_true',default=True,
                         dest='dsk',help='DSK to identify k-mers')
     kmerMatrixOptions.add_argument('--bifrost','-b',action='store_true',default=False,
@@ -1408,6 +1527,9 @@ def tabtkMain():
     kmerMatrixOptions.add_argument('--kmers','-k',action='store',required=False,nargs=1,
                         metavar='kmers',dest='kmers',default="",
                         help='Only query input sequence against a given k-mer database')
+    kmerMatrixOptions.add_argument('--approx','-a',action='store_true',required=False,
+                        dest='approximate',default=False,
+                        help='Search inexact k-mers (default: False)')
     kmerMatrixOptions.add_argument('--threads','-t',action='store',required=False,nargs=1,
                         metavar='threads',dest='threads',default=5,type=int,
                         help='Number of threads (default: 5)')
@@ -1433,14 +1555,15 @@ def tabtkMain():
         cmdValues = {'data': options.data[0:][0],
                  'format': options.format[0:][0] if isinstance(options.format,list) else options.format,
                  'output': options.output[0:][0] if isinstance(options.output,list) else options.output,
-                 'length': int(options.length[0:][0]) if isinstance(options.length,list) else options.length,
-                 'fragment': int(options.fragment[0:][0]) if isinstance(options.fragment,list) else options.fragment,
-                 'fraction': int(options.fraction[0:][0]) if isinstance(options.fraction,list) else options.fraction,
-                 'size': int(options.size[0:][0]) if isinstance(options.size,list) else options.size,
+                 'length': int(options.length[0:][0]) if isinstance(options.length,list) else int(options.length),
+                 'fragment': int(options.fragment[0:][0]) if isinstance(options.fragment,list) else int(options.fragment),
+                 'fraction': int(options.fraction[0:][0]) if isinstance(options.fraction,list) else int(options.fraction),
+                 'size': int(options.size[0:][0]) if isinstance(options.size,list) else int(options.size),
                  'mash': options.mash,
                  'fastani': options.fastani,
+                 'blast': options.blast,
                  'aln': options.aln,
-                 'threads': int(options.threads[0:][0]) if isinstance(options.threads,list) else options.threads
+                 'threads': int(options.threads[0:][0]) if isinstance(options.threads,list) else int(options.threads)
                  }
         
         similarity(cmdValues)
@@ -1449,11 +1572,11 @@ def tabtkMain():
         cmdValues = {'data': options.data[0:][0],
                  'format': options.format[0:][0] if isinstance(options.format,list) else options.format,
                  'output': options.output[0:][0] if isinstance(options.output,list) else options.output,
-                 'minCutoff': int(options.minCutoff[0:][0]) if isinstance(options.minCutoff,list) else options.minCutoff,
-                 'maxCutoff': int(options.maxCutoff[0:][0]) if isinstance(options.maxCutoff,list) else options.maxCutoff,
+                 'minCutoff': int(options.minCutoff[0:][0]) if isinstance(options.minCutoff,list) else int(options.minCutoff),
+                 'maxCutoff': int(options.maxCutoff[0:][0]) if isinstance(options.maxCutoff,list) else int(options.maxCutoff),
                  'rows': options.rows[0:][0] if isinstance(options.rows,list) else options.rows,
                  'columns': options.columns[0:][0] if isinstance(options.columns,list) else options.columns,
-                 'threads': int(options.threads[0:][0]) if isinstance(options.threads,list) else options.threads
+                 'threads': int(options.threads[0:][0]) if isinstance(options.threads,list) else int(options.threads)
                  }
 
         filter(cmdValues)
@@ -1462,8 +1585,8 @@ def tabtkMain():
         cmdValues = {'data': options.data[0:][0],
                  'format': options.format[0:][0] if isinstance(options.format,list) else options.format,
                  'output': options.output[0:][0] if isinstance(options.output,list) else options.output,
-                 'colfreq': float(options.colfreq[0:][0]) if isinstance(options.colfreq,list) else options.colfreq,
-                 'rowfreq': float(options.rowfreq[0:][0]) if isinstance(options.rowfreq,list) else options.rowfreq
+                 'colfreq': float(options.colfreq[0:][0]) if isinstance(options.colfreq,list) else float(options.colfreq),
+                 'rowfreq': float(options.rowfreq[0:][0]) if isinstance(options.rowfreq,list) else float(options.rowfreq)
                  }
 
         sample(cmdValues)
@@ -1474,7 +1597,7 @@ def tabtkMain():
                  'output': options.output[0:][0] if isinstance(options.output,list) else options.output,
                  'rownames': options.rownames[0:][0] if isinstance(options.rownames,list) else options.rownames,
                  'alphabetic': options.alphabetic,
-                 'threads': int(options.threads[0:][0]) if isinstance(options.threads,list) else options.threads,
+                 'threads': int(options.threads[0:][0]) if isinstance(options.threads,list) else int(options.threads)
                  }
 
         order(cmdValues)
@@ -1495,7 +1618,7 @@ def tabtkMain():
                  'output': options.output[0:][0] if isinstance(options.output,list) else options.output,
                  'prefix': options.prefix[0:][0] if isinstance(options.prefix,list) else options.prefix,
                  'separator': options.separator[0:][0] if isinstance(options.separator,list) else options.separator,
-                 'thresholds': [float(i) for i in options.thresholds[0:]] if isinstance(options.thresholds,list) else options.thresholds
+                 'thresholds': [float(i) for i in options.thresholds[0:]] if isinstance(options.thresholds,list) else float(options.thresholds)
                  }
 
         cluster(cmdValues)
@@ -1517,7 +1640,7 @@ def tabtkMain():
                  'fastlmm': options.fastlmm,
                  'plink': options.plink,
                  'gemma': options.gemma,
-                 'threads': int(options.threads[0:][0]) if isinstance(options.threads,list) else options.threads
+                 'threads': int(options.threads[0:][0]) if isinstance(options.threads,list) else int(options.threads)
                  }
 
         gwas(cmdValues)
@@ -1527,9 +1650,12 @@ def tabtkMain():
                  'output': options.output[0:][0] if isinstance(options.output,list) else options.output,
                  'dsk': options.dsk,
                  'bifrost': options.bifrost,
-                 'length': int(options.length[0:][0]) if isinstance(options.length,list) else options.length,
+                 'minabundance': int(options.minabundance[0:][0]) if isinstance(options.minabundance,list) else int(options.minabundance),
+                 'maxmemory': int(options.maxmemory[0:][0]) if isinstance(options.maxmemory,list) else int(options.maxmemory),
+                 'length': int(options.length[0:][0]) if isinstance(options.length,list) else int(options.length),
                  'kmers': options.kmers[0:][0] if isinstance(options.kmers,list) else options.kmers,
-                 'threads': int(options.threads[0:][0]) if isinstance(options.threads,list) else options.threads
+                 'approximate': options.approximate,
+                 'threads': int(options.threads[0:][0]) if isinstance(options.threads,list) else int(options.threads)
                  }
 
         table(cmdValues)
