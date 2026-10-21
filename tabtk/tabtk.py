@@ -57,7 +57,7 @@ def pairwiseSimilarity(firstRecord,secondRecord):
     return(similarityData)
 
 
-def alignmentSimilarity(ij):
+def alignmentSimilarity(i,j):
     seqMatch=0
     seqMisMatch=0
 
@@ -86,6 +86,11 @@ def mashSimilarity(cmdValues):
         print("Install MASH and try again... exiting...")
         sys.exit()
 
+    else:
+        pass
+
+    if int(cmdValues["length"])>=16:
+        print("Note: use shorter k-mers ≤16 when working diverse sequences")
     else:
         pass
 
@@ -168,7 +173,7 @@ def blastSimilarity(cmdValues):
     tmpOut2 = f"blast.{str(datetime.datetime.now()).replace(" ","").replace("-",".").replace(":",".")}"
 
     blastCmd1 = f"echo \'qseqid sseqid length pident qcovs\' | tr \' \' \'\\t\' > {tmpOut2}"
-    blastCmd2 = f"blastn -db {tmpOut} -query {tmpOut} -num_threads {cmdValues["threads"]} -outfmt \'6 qseqid sseqid length pident qcovs\' -evalue 0.001 >> {tmpOut2}"
+    blastCmd2 = f"blastn -db {tmpOut} -query {tmpOut} -word_size {cmdValues["length"]} -num_threads {cmdValues["threads"]} -outfmt \'6 qseqid sseqid length pident qcovs\' -evalue 0.001 >> {tmpOut2}"
 
     subprocess.call(blastCmd1,shell=True,stdout=subprocess.DEVNULL,stderr=subprocess.STDOUT)
     subprocess.call(blastCmd2,shell=True,stdout=subprocess.DEVNULL,stderr=subprocess.STDOUT)
@@ -225,6 +230,11 @@ def fastaniSimilarity(cmdValues):
     else:
         pass
 
+    if int(cmdValues["length"])>=16:
+        print("Note: use shorter k-mers ≤16 when working diverse sequences")
+    else:
+        pass
+
     tmpOut = f"mash.{str(datetime.datetime.now()).replace(" ","").replace("-",".").replace(":",".")}"
 
     fastaniCmd = f"fastANI --rl {cmdValues["data"]} --ql {cmdValues["data"]} -k {cmdValues["length"]} --matrix --fragLen {cmdValues["fragment"]} --minFraction {cmdValues["fraction"]} --output {tmpOut} -t {cmdValues["threads"]}"
@@ -237,11 +247,8 @@ def fastaniSimilarity(cmdValues):
 
     with open(tmpOut,"r") as fastaniFile:
         for itemPos,fastaniOutput in enumerate(fastaniFile):
-            if itemPos == 0:
-                pass
-            else:
-                item = fastaniOutput.strip().split("\t")
-                fastaniResults.append(f"{Path(item[0]).stem}\t{Path(item[1]).stem}\t{float(item[2])}")
+            item = fastaniOutput.strip().split("\t")
+            fastaniResults.append(f"{Path(item[0]).stem}\t{Path(item[1]).stem}\t{float(item[2])}")
 
     if os.path.exists(tmpOut):
         os.remove(tmpOut)
@@ -1210,7 +1217,7 @@ def table(cmdValues):
         args = [(seqFileNum,seqFileName,kmersFile,cmdValues) for seqFileNum,seqFileName in seqFileDF]
         kmerResults = pool.starmap(queryKmers, args)
 
-    with open(f"{Path(cmdValues["output"]).stem}.table.tsv","w") as kmerData:
+    with open(f"{cmdValues["output"]}","w") as kmerData:
         kmerFiles = []
         kmerHeaderFiles = []
 
