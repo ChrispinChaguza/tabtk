@@ -182,7 +182,7 @@ def blastSimilarity(cmdValues):
     blastData["tmp"] = blastData.apply(lambda x: (x["qcovs"] * x["pident"])/100,axis=1)
 
     blastData["qseqidR"] = blastData.apply(lambda x: x["qseqid"] if x["qseqid"] > x["sseqid"] else x["sseqid"],axis=1)
-    blastData["sseqidR"] = blastData.apply(lambda x: x["qseqid"] if x["qseqid"] < x["sseqid"] else x["sseqid"],axis=1)
+    blastData["sseqidR"] = blastData.apply(lambda x: x["sseqid"] if x["qseqid"] > x["sseqid"] else x["qseqid"],axis=1)
 
     blastData["qseqid"] = blastData["qseqidR"]
     blastData["sseqid"] = blastData["sseqidR"]
@@ -237,18 +237,28 @@ def fastaniSimilarity(cmdValues):
 
     tmpOut = f"mash.{str(datetime.datetime.now()).replace(" ","").replace("-",".").replace(":",".")}"
 
-    fastaniCmd = f"fastANI --rl {cmdValues["data"]} --ql {cmdValues["data"]} -k {cmdValues["length"]} --matrix --fragLen {cmdValues["fragment"]} --minFraction {cmdValues["fraction"]} --output {tmpOut} -t {cmdValues["threads"]}"
+    fastaniCmd = f"fastANI --rl {cmdValues["data"]} --ql {cmdValues["data"]} --kmer {cmdValues["length"]} --matrix --fragLen {cmdValues["fragment"]} --minFraction {cmdValues["fraction"]} --output {tmpOut} --threads {cmdValues["threads"]}"
 
     print("Calculating percent similarity... may take longer... be patient...")
 
     subprocess.call(fastaniCmd,shell=True,stdout=subprocess.DEVNULL,stderr=subprocess.STDOUT)
 
     fastaniResults = []
-
+    
     with open(tmpOut,"r") as fastaniFile:
         for itemPos,fastaniOutput in enumerate(fastaniFile):
             item = fastaniOutput.strip().split("\t")
-            fastaniResults.append(f"{Path(item[0]).stem}\t{Path(item[1]).stem}\t{float(item[2])}")
+            fastaniResults.append([Path(item[0]).stem,Path(item[1]).stem,float(item[2])])
+
+    fastaniData = pd.DataFrame(fastaniResults, columns=["seq1R","seq2R","pidR"])
+    fastaniData['pidR'] = fastaniData['pidR'].astype(float)
+
+    fastaniData["seq1RR"] = fastaniData.apply(lambda x: x["seq1R"] if x["seq1R"] > x["seq2R"] else x["seq2R"],axis=1)
+    fastaniData["seq2RR"] = fastaniData.apply(lambda x: x["seq2R"] if x["seq1R"] > x["seq2R"] else x["seq1R"],axis=1)
+
+    fastaniData = fastaniData[["seq1RR","seq2RR","pidR"]].groupby(['seq1RR','seq2RR']).agg({'pidR':min})
+    fastaniDataR = fastaniData.reset_index()
+    fastaniDataFinal = fastaniDataR[["seq1RR","seq2RR","pidR"]].rename(columns={"seq1RR":"seq1","seq2RR":"seq2","pid":"pidR"}).values.tolist()
 
     if os.path.exists(tmpOut):
         os.remove(tmpOut)
@@ -260,7 +270,7 @@ def fastaniSimilarity(cmdValues):
     else:
         pass
 
-    return(fastaniResults)
+    return(fastaniDataFinal)
 
 
 def similarity(cmdValues):
@@ -314,7 +324,7 @@ def similarity(cmdValues):
 
             bar = ChargingBar('Writing similarity values', max=len(similarityResults))
             for itemPair in similarityResults:
-                simData.write(f"{itemPair}\n")
+                simData.write(f"{"\t".join([str(r) for r in itemPair])}\n")
 
                 bar.next()
             bar.finish()
@@ -1564,8 +1574,8 @@ def tabtkMain():
                  'output': options.output[0:][0] if isinstance(options.output,list) else options.output,
                  'length': int(options.length[0:][0]) if isinstance(options.length,list) else int(options.length),
                  'fragment': int(options.fragment[0:][0]) if isinstance(options.fragment,list) else int(options.fragment),
-                 'fraction': int(options.fraction[0:][0]) if isinstance(options.fraction,list) else int(options.fraction),
-                 'size': int(options.size[0:][0]) if isinstance(options.size,list) else int(options.size),
+                 'fraction': float(options.fraction[0:][0]) if isinstance(options.fraction,list) else float(options.fraction),
+                 'size': float(options.size[0:][0]) if isinstance(options.size,list) else float(options.size),
                  'mash': options.mash,
                  'fastani': options.fastani,
                  'blast': options.blast,
