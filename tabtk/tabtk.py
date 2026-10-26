@@ -161,10 +161,16 @@ def blastSimilarity(cmdValues):
 
     tmpOut = f"blast.{str(datetime.datetime.now()).replace(" ","").replace("-",".").replace(":",".")}"
 
-    Cmd1 = f"cat {" ".join(tmpFileNames)} > {tmpOut}"
+    bar = ChargingBar("Creating database", max=len(tmpFileNames))
+    with open(tmpOut,"w") as tmpOutFile:
+        for fileName in tmpFileNames:
+            for seq in SeqIO.parse(fileName,"fasta"):
+                tmpOutFile.write(f">{seq.id}\n{seq.seq}\n")
+            bar.next()
+        bar.finish()
+
     Cmd2 = f"makeblastdb -in {tmpOut} -dbtype nucl"
 
-    subprocess.call(Cmd1,shell=True,stdout=subprocess.DEVNULL,stderr=subprocess.STDOUT)
     subprocess.call(Cmd2,shell=True,stdout=subprocess.DEVNULL,stderr=subprocess.STDOUT)
 
     print("Calculating percent similarity... may take longer... be patient...")
@@ -181,17 +187,19 @@ def blastSimilarity(cmdValues):
     blastData = pd.read_csv(tmpOut2,delimiter="\t",dtype={'pident': float,'qcovs': float})
     blastData["tmp"] = blastData.apply(lambda x: (x["qcovs"] * x["pident"])/100,axis=1)
 
+    blastDataR = blastData[["qseqid","sseqid","tmp"]].groupby(['qseqid','sseqid']).agg({'tmp':'mean'})
+    blastDataR = blastDataR.reset_index()
+
     blastData["qseqidR"] = blastData.apply(lambda x: x["qseqid"] if x["qseqid"] > x["sseqid"] else x["sseqid"],axis=1)
     blastData["sseqidR"] = blastData.apply(lambda x: x["sseqid"] if x["qseqid"] > x["sseqid"] else x["qseqid"],axis=1)
 
     blastData["qseqid"] = blastData["qseqidR"]
     blastData["sseqid"] = blastData["sseqidR"]
 
-    blastData["cov"] = blastData[["qseqid","sseqid","tmp"]].groupby(["qseqid","sseqid"])["tmp"].transform(lambda x: statistics.mean(x))
-    blastDataR = blastData.groupby(["qseqid","sseqid"]).first().reset_index()
+    blastDataR = blastData[["qseqid","sseqid","tmp"]].groupby(['qseqid','sseqid']).agg({'tmp':'min'})
+    blastDataR = blastDataR.reset_index()
 
-    blastData = blastDataR.drop(columns=["tmp","length","pident","qseqidR","sseqidR"])
-    blastDataFinal = blastData[["sseqid","qseqid","cov"]].rename(columns={"sseqid":"seq1","qseqid":"seq2","cov":"pid"}).values.tolist()
+    blastDataFinal = blastDataR[["sseqid","qseqid","tmp"]].rename(columns={"sseqid":"seq1","qseqid":"seq2","tmp":"pid"}).values.tolist()
 
     bar = ChargingBar("Cleaning temporary files", max=len(fileNames))
     for fileName in tmpFileNames:
