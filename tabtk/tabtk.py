@@ -172,23 +172,24 @@ def blastSimilarity(cmdValues):
     Cmd2 = f"makeblastdb -in {tmpOut} -dbtype nucl"
 
     subprocess.call(Cmd2,shell=True,stdout=subprocess.DEVNULL,stderr=subprocess.STDOUT)
-
+    
     print("Calculating percent similarity... may take longer... be patient...")
 
     tmpOut1 = f"blast.{str(datetime.datetime.now()).replace(" ","").replace("-",".").replace(":",".")}"
     tmpOut2 = f"blast.{str(datetime.datetime.now()).replace(" ","").replace("-",".").replace(":",".")}"
 
     blastCmd1 = f"echo \'qseqid sseqid length pident qcovs\' | tr \' \' \'\\t\' > {tmpOut2}"
-    blastCmd2 = f"blastn -db {tmpOut} -query {tmpOut} -word_size {cmdValues["length"]} -num_threads {cmdValues["threads"]} -outfmt \'6 qseqid sseqid length pident qcovs\' -evalue 0.001 >> {tmpOut2}"
+    blastCmd2 = f"blastn -db {tmpOut} -query {tmpOut} -word_size {cmdValues["length"]} -num_threads {cmdValues["threads"]} -outfmt \'6 qseqid sseqid length pident qcovs\' -evalue {cmdValues["evalue"]} >> {tmpOut2}"
 
     subprocess.call(blastCmd1,shell=True,stdout=subprocess.DEVNULL,stderr=subprocess.STDOUT)
     subprocess.call(blastCmd2,shell=True,stdout=subprocess.DEVNULL,stderr=subprocess.STDOUT)
 
-    blastData = pd.read_csv(tmpOut2,delimiter="\t",dtype={'pident': float,'qcovs': float})
-    blastData["tmp"] = blastData.apply(lambda x: (x["qcovs"] * x["pident"])/100,axis=1)
+    blastData = pd.read_csv(tmpOut2,delimiter="\t",dtype={'pident': float,'qcovs': float, 'length': int})
+    blastData["tmp"] = blastData.apply(lambda x: (x["length"] * x["pident"]),axis=1)
 
-    blastDataR = blastData[["qseqid","sseqid","tmp"]].groupby(['qseqid','sseqid']).agg({'tmp':'mean'})
-    blastDataR = blastDataR.reset_index()
+    blastData = blastData[["qseqid","sseqid","tmp","length","qcovs"]].groupby(['qseqid','sseqid']).agg({'tmp':'sum','length':'sum','qcovs':'mean'}).reset_index()
+
+    blastData["tmp1"] = blastData.apply(lambda x: (((x["tmp"] / x["length"]) * x["qcovs"]) / 100),axis=1)
 
     blastData["qseqidR"] = blastData.apply(lambda x: x["qseqid"] if x["qseqid"] > x["sseqid"] else x["sseqid"],axis=1)
     blastData["sseqidR"] = blastData.apply(lambda x: x["sseqid"] if x["qseqid"] > x["sseqid"] else x["qseqid"],axis=1)
@@ -196,10 +197,9 @@ def blastSimilarity(cmdValues):
     blastData["qseqid"] = blastData["qseqidR"]
     blastData["sseqid"] = blastData["sseqidR"]
 
-    blastDataR = blastData[["qseqid","sseqid","tmp"]].groupby(['qseqid','sseqid']).agg({'tmp':'min'})
-    blastDataR = blastDataR.reset_index()
+    blastDataR = blastData[["qseqid","sseqid","tmp1"]].groupby(['qseqid','sseqid']).agg({'tmp1':'min'}).reset_index()
 
-    blastDataFinal = blastDataR[["sseqid","qseqid","tmp"]].rename(columns={"sseqid":"seq1","qseqid":"seq2","tmp":"pid"}).values.tolist()
+    blastDataFinal = blastDataR[["sseqid","qseqid","tmp1"]].rename(columns={"sseqid":"seq1","qseqid":"seq2","tmp1":"pid"}).values.tolist()
 
     bar = ChargingBar("Cleaning temporary files", max=len(fileNames))
     for fileName in tmpFileNames:
@@ -332,7 +332,7 @@ def similarity(cmdValues):
 
             bar = ChargingBar('Writing similarity values', max=len(similarityResults))
             for itemPair in similarityResults:
-                simData.write(f"{"\t".join([str(r) for r in itemPair])}\n")
+                simData.write(f"{"\t".join([str(r).strip() for r in itemPair])}\n")
 
                 bar.next()
             bar.finish()
@@ -1363,6 +1363,9 @@ def tabtkMain():
     similarityOptions.add_argument('--fragment','-r',action='store',required=False,nargs=1,
                         metavar='fragment',dest='fragment',default=500,type=int,
                         help='Fragment length for calculating ANI; use with --fastani (default: 500)')
+    similarityOptions.add_argument('--evalue','-e',action='store',required=False,nargs=1,
+                        metavar='evalue',dest='evalue',default=0.001,type=float,
+                        help='Minimum evalue for hits; use with --blast (default: 0.001)')
     similarityOptions.add_argument('--threads','-t',action='store',required=False,nargs=1,
                         metavar='threads',dest='threads',default=5,type=int,
                         help='Number of threads (default: 5)')
@@ -1588,6 +1591,7 @@ def tabtkMain():
                  'fastani': options.fastani,
                  'blast': options.blast,
                  'aln': options.aln,
+                 'evalue': float(options.evalue[0:][0]) if isinstance(options.evalue,list) else float(options.evalue),
                  'threads': int(options.threads[0:][0]) if isinstance(options.threads,list) else int(options.threads)
                  }
         
